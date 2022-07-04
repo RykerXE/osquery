@@ -146,8 +146,9 @@ Status RocksDBDatabasePlugin::setUp() {
   }
 
   if (!s.ok() || db_ == nullptr) {
-    LOG(INFO) << "Rocksdb open failed (" << s.code() << ":" << s.subcode()
-              << ") " << s.ToString();
+    LOG(INFO) << "Rocksdb open failed (" << static_cast<uint32_t>(s.code())
+              << ":" << static_cast<uint32_t>(s.subcode()) << ") "
+              << s.ToString();
     // A failed open in R/W mode is a runtime error.
     return Status(1, s.ToString());
   }
@@ -304,6 +305,10 @@ Status RocksDBDatabasePlugin::put(const std::string& domain,
   return putBatch(domain, {std::make_pair(key, value)});
 }
 
+inline bool skipWal(const std::string& domain) {
+  return (kEvents == domain);
+}
+
 Status RocksDBDatabasePlugin::putBatch(const std::string& domain,
                                        const DatabaseStringValueList& data) {
   auto cfh = getHandleForColumnFamily(domain);
@@ -313,10 +318,10 @@ Status RocksDBDatabasePlugin::putBatch(const std::string& domain,
 
   // Events should be fast, and do not need to force syncs.
   auto options = rocksdb::WriteOptions();
-  if (kEvents == domain) {
+  if (skipWal(domain)) {
     options.disableWAL = true;
   } else {
-    options.sync = true;
+    options.sync = false;
   }
 
   rocksdb::WriteBatch batch;
@@ -357,8 +362,10 @@ Status RocksDBDatabasePlugin::remove(const std::string& domain,
 
   // We could sync here, but large deletes will cause multi-syncs.
   // For example: event record expirations found in an expired index.
-  if (kEvents != domain) {
-    options.sync = true;
+  if (skipWal(domain)) {
+    options.disableWAL = true;
+  } else {
+    options.sync = false;
   }
   auto s = getDB()->Delete(options, cfh, key);
   return Status(s.code(), s.ToString());
@@ -381,8 +388,10 @@ Status RocksDBDatabasePlugin::removeRange(const std::string& domain,
 
   // We could sync here, but large deletes will cause multi-syncs.
   // For example: event record expirations found in an expired index.
-  if (kEvents != domain) {
-    options.sync = true;
+  if (skipWal(domain)) {
+    options.disableWAL = true;
+  } else {
+    options.sync = false;
   }
   auto s = getDB()->DeleteRange(options, cfh, low, high);
   if (low <= high) {

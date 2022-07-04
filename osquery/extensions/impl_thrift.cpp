@@ -19,9 +19,10 @@
 
 #ifdef WIN32
 #include <osquery/filesystem/fileops.h>
-#include <osquery/process/windows/process_ops.h>
+#include <osquery/utils/system/windows/users_groups_helpers.h>
 #include <thrift/transport/TPipe.h>
 #include <thrift/transport/TPipeServer.h>
+
 #else
 #include <thrift/transport/TServerSocket.h>
 #include <thrift/transport/TSocket.h>
@@ -32,8 +33,6 @@
 
 #include "osquery/extensions/interface.h"
 
-#include <limits>
-
 #include <boost/chrono/include.hpp>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/lock_types.hpp>
@@ -42,6 +41,12 @@
 namespace osquery {
 
 FLAG(bool, thrift_verbose, false, "Enable the thrift log handler");
+FLAG(uint32, thrift_timeout, 300, "Timeout for thrift socket operations");
+FLAG(int32,
+     thrift_string_size_limit,
+     0,
+     "Sets the maximum string size allowed in a thrift message, use 0 for "
+     "unlimited");
 
 using namespace apache::thrift;
 using namespace apache::thrift::protocol;
@@ -349,6 +354,7 @@ void ExtensionRunnerInterface::connect() {
   // Construct the service's transport, protocol, thread pool.
   auto transport_fac = std::make_shared<TBufferedTransportFactory>();
   auto protocol_fac = std::make_shared<TBinaryProtocolFactory>();
+  protocol_fac->setStringSizeLimit(FLAGS_thrift_string_size_limit);
 
   server_->server = std::make_shared<TThreadedServer>(
       server_->processor, server_->transport, transport_fac, protocol_fac);
@@ -400,9 +406,6 @@ void ExtensionClientCore::init(const std::string& path, bool manager) {
 
   client_ = std::make_unique<ImplExtensionClient>();
   client_->socket = std::make_shared<TPlatformSocket>(path);
-#ifndef WIN32
-  client_->socket->setMaxRecvRetries(std::numeric_limits<int>::max());
-#endif
   client_->transport = std::make_shared<TBufferedTransport>(client_->socket);
   auto protocol = std::make_shared<TBinaryProtocol>(client_->transport);
 
@@ -427,8 +430,8 @@ ExtensionClientCore::~ExtensionClientCore() {
 void ExtensionClientCore::setTimeouts(size_t timeouts) {
 #if !defined(WIN32)
   // Windows TPipe does not support timeouts.
-  client_->socket->setRecvTimeout(timeouts);
-  client_->socket->setSendTimeout(timeouts);
+  client_->socket->setRecvTimeout(timeouts * 1000);
+  client_->socket->setSendTimeout(timeouts * 1000);
 #endif
 }
 
@@ -438,13 +441,13 @@ bool ExtensionClientCore::manager() {
 
 ExtensionClient::ExtensionClient(const std::string& path, size_t timeout) {
   init(path, false);
-  setTimeouts(timeout);
+  setTimeouts(timeout == 0 ? FLAGS_thrift_timeout : timeout);
 }
 
 ExtensionManagerClient::ExtensionManagerClient(const std::string& path,
                                                size_t timeout) {
   init(path, true);
-  setTimeouts(timeout);
+  setTimeouts(timeout == 0 ? FLAGS_thrift_timeout : timeout);
 }
 
 Status ExtensionClient::ping() {

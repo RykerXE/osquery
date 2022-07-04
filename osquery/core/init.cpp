@@ -50,6 +50,12 @@
 #include <osquery/utils/system/system.h>
 #include <osquery/utils/system/time.h>
 
+#ifdef WIN32
+#include <osquery/core/windows/global_users_groups_cache.h>
+#include <osquery/system/usersgroups/windows/groups_service.h>
+#include <osquery/system/usersgroups/windows/users_service.h>
+#endif
+
 #ifdef __linux__
 #include <sys/syscall.h>
 
@@ -112,7 +118,10 @@ DECLARE_bool(enable_numeric_monitoring);
 CLI_FLAG(bool, S, false, "Run as a shell process");
 CLI_FLAG(bool, D, false, "Run as a daemon process");
 CLI_FLAG(bool, daemonize, false, "Attempt to daemonize (POSIX only)");
-CLI_FLAG(uint64, alarm_timeout, 4, "Seconds to wait for a graceful shutdown");
+CLI_FLAG(uint64,
+         alarm_timeout,
+         15,
+         "Seconds to allow for shutdown. Minimum is 10");
 
 FLAG(bool, ephemeral, false, "Skip pidfile and database state checks");
 
@@ -128,6 +137,7 @@ DWORD kLegacyThreadId;
 const std::string kBackupDefaultFlagfile{OSQUERY_HOME "osquery.flags.default"};
 
 bool Initializer::isWorker_{false};
+std::atomic<bool> Initializer::resource_limit_hit_{false};
 
 namespace {
 
@@ -152,15 +162,31 @@ void initWorkDirectories() {
 void signalHandler(int num) {
   int rc = 0;
 
+  if (num == SIGUSR1) {
+    Initializer::resourceLimitHit();
+  }
+
   // Expect SIGTERM and SIGINT to gracefully shutdown.
   // Other signals are unexpected.
-  if (num != SIGTERM && num != SIGINT) {
+  else if (num != SIGTERM && num != SIGINT) {
     rc = 128 + num;
   }
 
   Initializer::requestShutdown(rc);
 }
+
+bool validateAlarmTimeout(const char* flagname, std::uint64_t value) {
+  if (value < 10) {
+    osquery::systemLog("Alarm timeout cannot be lower than 10 seconds");
+    std::cerr << "Alarm timeout cannot be lower than 10 seconds" << std::endl;
+    return false;
+  }
+
+  return true;
+}
 } // namespace
+
+DEFINE_validator(alarm_timeout, &validateAlarmTimeout);
 
 static inline void printUsage(const std::string& binary, ToolType tool) {
   // Parse help options before gflags. Only display osquery-related options.
@@ -321,6 +347,7 @@ Initializer::Initializer(int& argc,
 
   std::signal(SIGTERM, signalHandler);
   std::signal(SIGINT, signalHandler);
+  std::signal(SIGUSR1, signalHandler);
 
   // If the caller is checking configuration, disable the watchdog/worker.
   if (FLAGS_config_check || FLAGS_database_dump || FLAGS_config_dump) {
@@ -474,6 +501,24 @@ void Initializer::initWorker(const std::string& name) const {
 }
 
 void Initializer::initWorkerWatcher(const std::string& name) const {
+  if (isWorker() || !isWatcher()) {
+#ifdef OSQUERY_WINDOWS
+    std::promise<void> users_cache_promise;
+    std::promise<void> groups_cache_promise;
+    GlobalUsersGroupsCache::global_users_cache_future_ =
+        users_cache_promise.get_future();
+    GlobalUsersGroupsCache::global_groups_cache_future_ =
+        groups_cache_promise.get_future();
+
+    Dispatcher::addService(std::make_shared<UsersService>(
+        std::move(users_cache_promise),
+        GlobalUsersGroupsCache::global_users_cache_));
+    Dispatcher::addService(std::make_shared<GroupsService>(
+        std::move(groups_cache_promise),
+        GlobalUsersGroupsCache::global_groups_cache_));
+#endif
+  }
+
   if (isWorker()) {
     initWorker(name);
   } else {
@@ -557,8 +602,16 @@ void Initializer::start() const {
     }
   }
 
+  if (shutdownRequested()) {
+    return;
+  }
+
   // Then set the config plugin, which uses a single/active plugin.
   initActivePlugin("config", FLAGS_config_plugin);
+
+  if (shutdownRequested()) {
+    return;
+  }
 
   // Run the setup for all lazy registries (tables, SQL).
   Registry::setUp();
@@ -581,6 +634,10 @@ void Initializer::start() const {
     return;
   }
 
+  if (shutdownRequested()) {
+    return;
+  }
+
   // Load the osquery config using the default/active config plugin.
   s = Config::get().load();
   if (!s.ok()) {
@@ -594,23 +651,57 @@ void Initializer::start() const {
 
   // Initialize the status and result plugin logger.
   if (!FLAGS_disable_logging) {
+    if (shutdownRequested()) {
+      return;
+    }
+
     initActivePlugin("logger", FLAGS_logger_plugin);
+
+    if (shutdownRequested()) {
+      return;
+    }
+
     initLogger(binary_);
   }
 
   // Initialize the distributed plugin, if necessary
   if (!FLAGS_disable_distributed) {
+    if (shutdownRequested()) {
+      return;
+    }
+
     initActivePlugin("distributed", FLAGS_distributed_plugin);
   }
 
   if (FLAGS_enable_numeric_monitoring) {
+    if (shutdownRequested()) {
+      return;
+    }
+
     initActivePlugin(monitoring::registryName(),
                      FLAGS_numeric_monitoring_plugins);
   }
 
+  if (shutdownRequested()) {
+    return;
+  }
+
   // Start event threads.
   attachEvents();
+
+  if (shutdownRequested()) {
+    return;
+  }
+
   EventFactory::delay();
+}
+
+void Initializer::resourceLimitHit() {
+  resource_limit_hit_ = true;
+}
+
+bool Initializer::isResourceLimitHit() {
+  return resource_limit_hit_.load();
 }
 
 /**
@@ -691,4 +782,4 @@ void Initializer::shutdownNow(int retcode) {
   platformTeardown();
   _Exit(retcode);
 }
-}
+} // namespace osquery

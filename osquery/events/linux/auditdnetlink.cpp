@@ -7,6 +7,7 @@
  * SPDX-License-Identifier: (Apache-2.0 OR GPL-2.0-only)
  */
 
+#include <libaudit.h>
 #include <linux/audit.h>
 #include <poll.h>
 #include <sys/types.h>
@@ -351,7 +352,7 @@ bool AuditdNetlinkReader::configureAuditService() noexcept {
   if (FLAGS_audit_allow_sockets) {
     VLOG(1) << "Enabling audit rules for the socket_events table";
 
-    for (int syscall : kSocketEventsSyscalls) {
+    for (int syscall : getSocketEventsSyscalls()) {
       monitored_syscall_list_.insert(syscall);
     }
   }
@@ -392,54 +393,45 @@ bool AuditdNetlinkReader::configureAuditService() noexcept {
     }
   }
 
+  audit_rule_data rule = {};
+
   // Attempt to add each one of the rules we collected
   for (int syscall_number : monitored_syscall_list_) {
-    audit_rule_data rule = {};
     audit_rule_syscall_data(&rule, syscall_number);
-
-    // clang-format off
-    int rule_add_error = audit_add_rule_data(audit_netlink_handle_, &rule,
-      // We want to be notified when we exit from the syscall
-      AUDIT_FILTER_EXIT,
-
-      // Always audit this syscall event
-      AUDIT_ALWAYS
-    );
-    // clang-format on
-
-    // When exiting, don't remove the rules that were already installed, unless
-    // we have been asked to
-    if (rule_add_error >= 0) {
-      if (FLAGS_audit_debug) {
-        VLOG(1) << "Audit rule installed for syscall " << syscall_number;
-      }
-
-      installed_rule_list_.push_back(rule);
-      continue;
-    }
-
     if (FLAGS_audit_debug) {
-      VLOG(1) << "Audit rule for syscall " << syscall_number
-              << " could not be installed: " << (-errno);
-    }
-
-    if (FLAGS_audit_force_unconfigure) {
-      installed_rule_list_.push_back(rule);
-    }
-
-    rule_add_error = -rule_add_error;
-
-    if (rule_add_error != EEXIST) {
-      VLOG(1) << "The following syscall number could not be added to the audit "
-                 "service rules: "
-              << syscall_number << ". Some of the auditd "
-              << "table may not work properly (process_events, "
-              << "socket_events, process_file_events, user_events)";
+      VLOG(1) << "Audit rule queued for syscall " << syscall_number;
     }
   }
 
+  // clang-format off
+  int rule_add_error = audit_add_rule_data(audit_netlink_handle_, &rule,
+    // We want to be notified when we exit from the syscall
+    AUDIT_FILTER_EXIT,
+
+    // Always audit this syscall event
+    AUDIT_ALWAYS
+  );
+  // clang-format on
+
+  if (rule_add_error < 0) {
+    const char* errno_message = audit_errno_to_name(-rule_add_error);
+    LOG(ERROR) << "Failed to install the audit rule due to one or more "
+               << "syscalls with error "
+               << (errno_message ? errno_message : "NULL")
+               << ", Audit-based tables may not function as expected";
+
+  } else if (FLAGS_audit_debug) {
+    VLOG(1) << "Audit rule installed for all queued syscalls";
+  }
+
+  if (FLAGS_audit_force_unconfigure || rule_add_error >= 0) {
+    // keep a track of the rule even if installing it failed when asked to
+    // forcefully unconfigure.
+    installed_rule_list_.push_back(rule);
+  }
+
   return true;
-}
+} // namespace osquery
 
 bool AuditdNetlinkReader::clearAuditConfiguration() noexcept {
   int seq = audit_request_rules_list_data(audit_netlink_handle_);
@@ -591,8 +583,13 @@ void AuditdNetlinkReader::restoreAuditServiceConfiguration() noexcept {
   VLOG(1) << "Uninstalling the audit rules we have installed";
 
   for (auto& rule : installed_rule_list_) {
-    audit_delete_rule_data(
+    int rule_delete_error = audit_delete_rule_data(
         audit_netlink_handle_, &rule, AUDIT_FILTER_EXIT, AUDIT_ALWAYS);
+    if (FLAGS_audit_debug && rule_delete_error < 0) {
+      const char* errno_message = audit_errno_to_name(-rule_delete_error);
+      VLOG(1) << "Error code returned by delete rule "
+              << (errno_message ? errno_message : "NULL");
+    }
   }
 
   installed_rule_list_.clear();

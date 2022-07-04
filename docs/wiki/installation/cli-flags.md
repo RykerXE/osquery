@@ -27,7 +27,7 @@ A special flag, part of Google Flags, can be used to read additional flags from 
 
 Include line-delimited switches to be interpreted and used as CLI-flags:
 
-```
+```text
 --config_plugin=custom_plugin
 --logger_plugin=custom_plugin
 --distributed_plugin=custom_plugin
@@ -88,7 +88,7 @@ Performance limit level (`0`=normal, `1`=restrictive, `-1`=disabled). The watchd
 
 The level limits are as follows:
 Memory: default 200M, restrictive 100M
-CPU: default 25% (for 9 seconds), restrictive 18% (for 9 seconds)
+CPU: default 10% (for 12 seconds), restrictive 5% (for 6 seconds)
 
 The normal level allows for 10 restarts if the limits are violated. The restrictive allows for only 4, then the service will be disabled. For both there is a linear backoff of 5 seconds, doubling each retry.
 
@@ -102,21 +102,32 @@ If this value is >0 then the watchdog level (`--watchdog_level`) for maximum mem
 
 `--watchdog_utilization_limit=0`
 
-If this value is >0 then the watchdog level (`--watchdog_level`) for maximum sustained CPU utilization is overridden. Use this if you would like to allow the `osqueryd` process to use more than 30% of a thread for more than 9 seconds of wall time. The length of sustained utilization is not independently configurable.
+If this value is >0 then the watchdog level (`--watchdog_level`) for maximum sustained CPU utilization is overridden. Use this if you would like to allow the `osqueryd` process to use more than 10% of a thread for more than `--watchdog_latency_limit` seconds of wall time. The length of sustained utilization is configurable with `--watchdog_latency_limit`.
 
 This value is a maximum number of CPU cycles counted as the `processes` table's `user_time` and `system_time`. The default is 90, meaning less 90 seconds of cpu time per 3 seconds of wall time is allowed.
+
+`--watchdog_latency_limit=0`
+
+If this value is >0 then the watchdog level (`--watchdog_level`) for time
+allowed to spend at maximum sustained CPU utilization is overridden. Use this
+if you would like to allow the `osqueryd` process to use more than the cpu
+utilization limit for longer than the defaults.
+
+This value is a duration in seconds that the watchdog allows osquery to spend
+at maximum sustained CPU utilization.
 
 `--watchdog_delay=60`
 
 A delay in seconds before the watchdog process starts enforcing memory and CPU utilization limits. The default value `60s` allows the daemon to perform resource intense actions, such as forwarding logs, at startup.
 
+`--watchdog_forced_shutdown_delay=4`
+
+Amount of seconds to wait to issue a forced shutdown, after the watchdog has issued a graceful shutdown request to a worker or extension, due to resource limits being hit.
+Note that on Windows this doesn't have any effect currently, since the watchdog issues a TerminateProcess as a "graceful" shutdown, which immediately kills the process.
+
 `--enable_extensions_watchdog=false`
 
 By default the watchdog monitors extensions for improper shutdown, but NOT for performance and utilization issues. Enable this flag if you would like extensions to use the same CPU and memory limits as the osquery worker. This means that your extensions or third-party extensions may be asked to stop and restart during execution.
-
-`--utc=true`
-
-Attempt to convert all UNIX calendar times to UTC.
 
 `--table_delay=0`
 
@@ -236,11 +247,15 @@ The **tls** endpoint path, e.g.: `/api/v1/logger` when using the **tls** logger 
 
 See the **tls**/[remote](../deployment/remote.md) plugin documentation. An enrollment process will be used to allow server-side implemented authentication and identification/authorization. You must provide an endpoint relative to the `--tls_hostname` URI.
 
-`--tls_enroll_max_attempts=3`
+`--tls_enroll_max_attempts=12`
 
-The total number of attempts that will be made to the remote enroll server if a
-request fails. If an attempt fails, it will be retried with exponential
-backoff, up to the max number of attempts set.
+The total number of attempts that will be made to the remote enroll server if a request fails.
+If an attempt fails, it will be retried up to the max number of attempts set, with exponential backoff limited by the flag `--tls_enroll_max_interval`.
+If the flag is set to 0, the amount of attempts will be infinite.
+
+`--tls_enroll_max_interval=600`
+
+Maximum wait time in seconds between enroll retry attempts. This works in conjunction with `--tls_enroll_max_attempts`, and affects both the limited and the infinite attempts case.
 
 `--logger_tls_period=3`
 
@@ -315,6 +330,24 @@ Comma-delimited list of table names to be disabled. This allows osquery to be la
 
 Maximum file read size. The daemon or shell will first 'stat' each file before reading. If the reported size is greater than `read_max` a "file too large" error will be returned.
 
+## Windows-only runtime control flags
+
+`--users_service_delay=250`
+
+Defines the amount of milliseconds to wait during a scan of users information, between a batch of 100 users and the other. This is meant to throttle the CPU usage of osquery and especially the LSASS process on a Windows Server DC. The first users batch is always gathered immediately at the start of the scan.
+
+`--users_service_interval=1800`
+
+Defines the amount of seconds to wait between full scans of users information. The background service first obtains a list of all the users that are present on a machine, then start obtaining their details, using `users_service_delay` to slow down the process, then when the whole list has been processed, it will sleep `users_service_interval` seconds.
+
+`--groups_service_delay=150`
+
+Works the same as `users_service_delay`, but for the groups service. The default value is lower because collecting groups information is less performance intensive.
+
+`--groups_service_interval=1800`
+
+Works the same as `users_service_interval`, but for the groups service.
+
 ## Events control flags
 
 `--disable_events=false`
@@ -332,6 +365,14 @@ Since event rows are only "added" it does not make sense to emit "removed" resul
 `--events_max=50000`
 
 Maximum number of events to buffer in the backing store while waiting for a query to "drain" them (if and only if the events are old enough to be expired out, see above). For example, the default value indicates that a maximum of the `50000` most recent events will be stored. The right value for *your* osquery deployment, if you want to avoid missed/dropped events, should be considered based on the combination of your host's event occurrence frequency and the interval of your scheduled queries of those tables.
+
+`--events_enforce_denylist=false`
+
+This controls whether watchdog denylisting is enforced on queries using "*_events" (event-based) tables. As these these queries operate on meta-generated table logic, performance issues are unavoidable. It does not make sense to denylist. Enforcing this may lead to adverse and opposite effects because events will buffer longer and impact RocksDB storage.
+
+This only considers queries that are entirely event-based. For example `SELECT * FROM process_events` is considered, but `SELECT * FROM process_events join time` is not.
+
+It is not recommended to set this to `true`.
 
 ### Windows-only events control flags
 
@@ -354,6 +395,24 @@ List of Windows Event Log channels for osquery to subscribe to. By default, osqu
 `--hardware_disabled_types=partition`
 
 This is a comma-separated list of UDEV types to drop. On machines with flash-backed storage it is likely you'll encounter lots of noise from `disk` and `partition` types.
+
+### macOS-only events control flags
+
+`--disable_endpointsecurity=true`
+
+Setting to `false` (in combination with `--disable_events=false`) turns on EndpointSecurity-based event collection within osquery (supported in macOS 10.15 and newer), and enables the use of the `es_process_events` table. This feature requires running osquery as root. It also requires that the osquery executable be code-signed and notarized to have the Endpoint Security client entitlement; official release builds of osquery will be appropriately code-signed. Lastly, it requires that the host give Full Disk Access permission to the osqueryd executable; for more information see the [process auditing section of osquery's deployment documentation](../deployment/process-auditing.md) as well as [installing osquery on macOS](./install-macos.md).
+
+`--disable_endpointsecurity_fim=true`
+
+Setting to `false` (in addition to `--disable_events=false` and `--disable_endpointsecurity=false`) will turn on EndpointSecurity based file event collection in osquery, running on macOS 10.15 and newer. This enables the use of `es_process_file_events` table.
+
+`--es_fim_mute_path_literal`
+
+This is a comma delimited list of path literals, which when set, is passed to EndpointSecurity based `es_process_file_events` table. This will result in events being muted for the paths set in here.
+
+`--es_fim_mute_path_prefix`
+
+This is a comma delimited list of path prefixes, which when set is passed to EndpointSecurity based `es_process_file_events` table. This will result in events being muted which match the path prefixes. 
 
 ## Logging/results flags
 
@@ -389,45 +448,30 @@ The minimum level for status logs written to stderr. Use the following values: `
 
 The default behavior is to also write status logs to stderr. Set this flag to false to disable writing (copying) status logs to stderr. In this case `--verbose` is respected.
 
-`--host_identifier=hostname`
-
-Field used to identify the host running osquery: `hostname`, `uuid`, `ephemeral`, `instance`, `specified`.
-
-DHCP may assign variable hostnames, if this is the case, you may need a consistent logging label. Four options are available to you:
-
-- `uuid` uses the platform (DMTF) host UUID, fetched at process start.
-- `instance` uses an instance-unique UUID generated at process start, persisted in the backing store.
-- `ephemeral` uses an instance-unique UUID generated at process start, not persisted.
-- `specified` uses an ID provided by the `--specified_identifier` flag.
-
-`--specified_identifier=this.is.the.identifier`
-
-If `--host_identifier=specified` is set, use this value as the host identifier.
-
-`--verbose=false`
-
-Enable verbose informational messages.
-
-`--thrift_verbose=false`
-
-Enable thrift global output.
-
 `--logger_path=/var/log/osquery/`
 
-Directory path for `ERROR`/`WARN`/`INFO` and query results logging.
+Directory path for `ERROR`/`WARN`/`INFO` and query result logging by the **filesystem** plugin.
 
-`--logger_mode=420`
+`--logger_mode=0640`
 
-File mode for output log files (provided as a decimal string).  Note that this
-affects both the query result log and the status logs. **Warning**: If run as root, log files may contain sensitive information!
+File mode for output log files by the **filesystem** plugin, provided as an octal string. Note that this affects both the query result log and the status logs and only works on POSIX platforms. (Versions previous to osquery 5.0.0 were incorrectly interpreting `logger_mode` as a number in decimal format, not octal.)
+**Warning**: If run as root, log files may contain sensitive information! 
 
-`--value_max=512`
+`--logger_rotate=false`
 
-Maximum returned row value size.
+When enabled, the **filesystem** plugin will rotate logs based on size. An example includes `/var/log/osquery/osqueryd.results.log` being rotated to `/var/log/osquery/osqueryd.results.log.1` when the trigger size is reached. Files after the first rotation will be Zstandard-compressed and will use the `.zst` file extension. A max number of log files will be maintained and logs overflowing this count will be deleted after rotation.
+
+`--logger_rotate_size=26214400` (25MB)
+
+A size, specified in bytes, to trigger rotation when enabled with `--logger_rotate`. A result or snapshot log will be rotated when it grows past this size. The size is checked before each new write to the logfile.
+
+`--logger_rotate_max_files=25`
+
+The max number of result and snapshot rotation files. The count applies to each individually, meaning by default osquery will maintain 25 results files and 25 snapshot files. If a rotation happens after hitting this max, the oldest file will be removed.
 
 `--logger_syslog_facility`
 
-Set the syslog facility (number) `0`-`23` for the results log. When using the **syslog** logger plugin, the default facility is `19` at the `LOG_INFO` level, which does not log to `/var/log/system`.
+Set the syslog facility (number) `0`-`23` for the results log by the **syslog** plugin. When using the **syslog** logger plugin, the default facility is `19` at the `LOG_INFO` level, which does not log to `/var/log/system`.
 
 `--logger_syslog_prepend_cee`
 
@@ -454,6 +498,41 @@ Compression codec to use for compressing message sets. Valid options are ("none"
 There are multiple logger plugins that use a "buffered logging" implementation. The TLS and AWS loggers use this approach. This flag sets the maximum number of logs to buffer before dropping new logs. If the buffered logs have not been shuttled to the logger destination they will be purged in order of their timestamp. The oldest logs are purged first.
 
 Setting this to value to `0` means unlimited logs will be buffered.
+
+`--host_identifier=hostname`
+
+Field used to identify the host running osquery: `hostname`, `uuid`, `ephemeral`, `instance`, `specified`.
+
+DHCP may assign variable hostnames, if this is the case, you may need a consistent logging label. Four options are available to you:
+
+- `uuid` uses the platform (DMTF) host UUID, fetched at process start.
+- `instance` uses an instance-unique UUID generated at process start, persisted in the backing store.
+- `ephemeral` uses an instance-unique UUID generated at process start, not persisted.
+- `specified` uses an ID provided by the `--specified_identifier` flag.
+
+`--specified_identifier=this.is.the.identifier`
+
+If `--host_identifier=specified` is set, use this value as the host identifier.
+
+`--verbose=false`
+
+Enable verbose informational messages.
+
+`--thrift_verbose=false`
+
+Enable thrift global output.
+
+`--value_max=512`
+
+Maximum returned row value size.
+
+`--schedule_lognames=false`
+
+Log executing scheduled query names at the `INFO` level, and not the `VERBOSE` level
+
+`--distributed_loginfo=false`
+
+Log executing distributed queries at the `INFO` level, and not the `VERBOSE` level
 
 ## Distributed query service flags
 
@@ -487,9 +566,9 @@ Maximum number of logs to ingest per run (~200ms between runs). Use this as a fa
 
 ## Augeas flags
 
-`--augeas_lenses=/usr/share/osquery/lenses`
+`--augeas_lenses=/opt/osquery/share/osquery/lenses`
 
-Augeas lenses are bundled with osquery distributions. On Linux they are installed in `/usr/share/osquery/lenses`. On macOS, lenses are installed in the `/private/var/osquery/lenses` directory. Specify the path to the directory containing custom or different version lenses files.
+Augeas lenses are bundled with osquery distributions. On Linux they are installed in `/opt/osquery/share/osquery/lenses`. On macOS, lenses are installed in the `/private/var/osquery/lenses` directory. Specify the path to the directory containing custom or different version lenses files.
 
 ## Docker flags
 

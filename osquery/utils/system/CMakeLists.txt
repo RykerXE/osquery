@@ -22,6 +22,10 @@ function(osqueryUtilsSystemMain)
   generateOsqueryUtilsSystemTime()
   generateOsqueryUtilsSystem()
   generateOsqueryUtilsSystemUptime()
+
+  if(DEFINED PLATFORM_WINDOWS)
+    generateOsqueryUtilsSystemUsersGroups()
+  endif()
 endfunction()
 
 function(generateOsqueryUtilsSystemEnv)
@@ -208,18 +212,21 @@ function(generateOsqueryUtilsSystem)
     thirdparty_googletest_headers
   )
 
+  set(public_header_files
+    system.h
+  )
+
   if(DEFINED PLATFORM_POSIX)
-    set(public_header_files
+    list(APPEND public_header_files
       posix/system.h
     )
-
   elseif(DEFINED PLATFORM_WINDOWS)
-    set(public_header_files
+      list(APPEND public_header_files
       windows/system.h
     )
   endif()
 
-  generateIncludeNamespace(osquery_utils_system_systemutils "osquery/utils/system" "FILE_ONLY" ${public_header_files})
+  generateIncludeNamespace(osquery_utils_system_systemutils "osquery/utils/system" "FULL_PATH" ${public_header_files})
 endfunction()
 
 function(generateOsqueryUtilsSystemUptime)
@@ -237,6 +244,23 @@ function(generateOsqueryUtilsSystemUptime)
   )
 
   generateIncludeNamespace(osquery_utils_system_uptime "osquery/utils/system" "FILE_ONLY" ${public_header_files})
+endfunction()
+
+function(generateOsqueryUtilsSystemUsersGroups)
+  add_osquery_library(osquery_utils_system_usersgroupshelpers EXCLUDE_FROM_ALL
+    windows/users_groups_helpers.cpp
+  )
+
+  target_link_libraries(osquery_utils_system_usersgroupshelpers PUBLIC
+    osquery_cxx_settings
+    osquery_utils_conversions
+  )
+
+  set(public_header_files
+    windows/users_groups_helpers.h
+  )
+
+  generateIncludeNamespace(osquery_utils_system_usersgroupshelpers "osquery/utils/system" "FULL_PATH" ${public_header_files})
 endfunction()
 
 function(generateOsqueryUtilsSystemErrnoErrnotestsTest)

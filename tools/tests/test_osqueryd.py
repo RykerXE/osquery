@@ -19,8 +19,7 @@ import test_base
 
 
 class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
-    @test_base.flaky
-    def test_1_daemon_without_watchdog(self):
+    def test_daemon_without_watchdog(self):
         daemon = self._run_daemon({
             "disable_watchdog": True,
             "disable_extensions": True,
@@ -28,8 +27,7 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         self.assertTrue(daemon.isAlive())
         daemon.kill()
 
-    @test_base.flaky
-    def test_2_daemon_with_option(self):
+    def test_daemon_with_option(self):
         logger_path = test_base.getTestDirectory(test_base.TEMP_DIR)
         daemon = self._run_daemon(
             {
@@ -64,8 +62,7 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         self.assertTrue(len(data) > 0)
         daemon.kill()
 
-    @test_base.flaky
-    def test_3_daemon_with_watchdog(self):
+    def test_daemon_with_watchdog(self):
         # This test does not join the service threads properly (waits for int).
         if os.environ.get('SANITIZE') is not None:
             return
@@ -87,8 +84,7 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         # dies when the watcher goes away
         self.assertTrue(daemon.isDead(children[0]))
 
-    @test_base.flaky
-    def test_3_daemon_lost_worker(self):
+    def test_daemon_lost_worker(self):
         # Test that killed workers are respawned by the watcher
         if os.environ.get('SANITIZE') is not None:
             return
@@ -118,29 +114,28 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         children = daemon.getChildren()
         self.assertTrue(len(children) > 0)
 
-    @test_base.flaky
-    def test_4_daemon_sighup(self):
-        # A hangup signal should not do anything to the daemon.
-        daemon = self._run_daemon({
-            "disable_watchdog": True,
-        })
-        self.assertTrue(daemon.isAlive())
+    def test_daemon_sigint(self):
+        # First check that the pidfile does not exist.
+        # The existence will be used to check if the daemon has run.
+        pidfile_path = test_base.CONFIG["options"]["pidfile"]
+        def pidfile_exists():
+            return os.path.exists(pidfile_path)
+        self.assertFalse(pidfile_exists())
 
-        # Send SIGHUP on posix. Windows does not have SIGHUP so we use SIGTERM
-        sig = signal.SIGHUP if os.name != "nt" else signal.SIGTERM
-        os.kill(daemon.proc.pid, sig)
-        self.assertTrue(daemon.isAlive())
-
-    @test_base.flaky
-    def test_5_daemon_sigint(self):
         # An interrupt signal will cause the daemon to stop.
         daemon = self._run_daemon({
             "disable_watchdog": True,
-            "ephemeral": True,
+            "disable_extensions": True,
             "disable_database": True,
             "disable_logging": True,
         })
         self.assertTrue(daemon.isAlive())
+        self.assertEqual(pidfile_path, daemon.options["pidfile"])
+
+        # Wait for the pidfile to exist.
+        # This means the signal handler has been installed.
+        test_base.expectTrue(pidfile_exists)
+        self.assertTrue(pidfile_exists())
 
         # Send a SIGINT
         os.kill(daemon.pid, signal.SIGINT)
@@ -148,19 +143,18 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         if os.name != "nt":
             self.assertEqual(daemon.retcode, 0)
 
-    @test_base.flaky
-    def test_6_logger_mode(self):
+    def test_logger_mode(self):
         logger_path = test_base.getTestDirectory(test_base.TEMP_DIR)
-        test_mode = 0o754  # Strange mode that should never exist
+        test_mode = "0754" # Strange mode that should never exist
         daemon = self._run_daemon(
             {
                 "disable_watchdog": True,
                 "disable_extensions": True,
                 "disable_logging": False,
+                "logger_mode": test_mode,
             },
             options_only={
                 "logger_path": logger_path,
-                "logger_mode": test_mode,
                 "verbose": True,
             },
         )
@@ -190,11 +184,14 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
             if pth.find('.log') > 0 and os.name != "nt":
                 rpath = os.path.realpath(pth)
                 mode = os.stat(rpath).st_mode & 0o777
-                self.assertEqual(mode, test_mode)
+                # NOTE: We are converting test_mode in this way because
+                # the python integer to octal string conversion
+                # uses a format ("0o754") that's not supported by C++
+                self.assertEqual(mode, int(test_mode, 8))
 
         daemon.kill()
 
-    def test_7_logger_stdout(self):
+    def test_logger_stdout(self):
         logger_path = test_base.getTestDirectory(test_base.TEMP_DIR)
         daemon = self._run_daemon({
             "disable_watchdog": True,
@@ -216,7 +213,7 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         self.assertTrue(pathDoesntExist())
         daemon.kill()
 
-    def test_8_hostid_uuid(self):
+    def test_hostid_uuid(self):
         # Test added to test using UUID as hostname ident for issue #3195
         daemon = self._run_daemon({
             "disable_watchdog": True,
@@ -230,7 +227,7 @@ class DaemonTests(test_base.ProcessGenerator, unittest.TestCase):
         self.assertTrue(daemon.isAlive())
         daemon.kill()
 
-    def test_9_hostid_instance(self):
+    def test_hostid_instance(self):
         daemon = self._run_daemon({
             "disable_watchdog": True,
             "disable_extensions": True,

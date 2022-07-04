@@ -275,20 +275,20 @@ bool EventFactory::exists(const std::string& name_id) {
   return (getInstance().event_subs_.count(name_id) > 0);
 }
 
-std::vector<std::string> EventFactory::publisherTypes() {
+std::set<std::string> EventFactory::publisherTypes() {
   RecursiveLock lock(getInstance().factory_lock_);
-  std::vector<std::string> types;
+  std::set<std::string> types;
   for (const auto& publisher : getInstance().event_pubs_) {
-    types.push_back(publisher.first);
+    types.insert(publisher.first);
   }
   return types;
 }
 
-std::vector<std::string> EventFactory::subscriberNames() {
+std::set<std::string> EventFactory::subscriberNames() {
   RecursiveLock lock(getInstance().factory_lock_);
-  std::vector<std::string> names;
+  std::set<std::string> names;
   for (const auto& subscriber : getInstance().event_subs_) {
-    names.push_back(subscriber.first);
+    names.insert(subscriber.first);
   }
   return names;
 }
@@ -342,14 +342,16 @@ void EventFactory::configUpdate() {
 
     RecursiveLock lock(ef.factory_lock_);
     auto subscriber = ef.getEventSubscriber(details.first);
-    subscriber->min_expiration_ = details.second.max_interval * 3;
-    subscriber->min_expiration_ += (60 - (subscriber->min_expiration_ % 60));
+    auto min_expiry = details.second.max_interval * 3;
+    min_expiry += (60 - (min_expiry % 60));
+    subscriber->setMinExpiry(min_expiry);
 
     // Emit a warning for each subscriber affected by the small expiration.
     auto expiry = subscriber->getEventsExpiry();
-    if (expiry > 0 && subscriber->min_expiration_ > expiry) {
-      LOG(INFO) << "Subscriber expiration is too low: "
-                << subscriber->getName();
+    if (expiry > 0 && min_expiry > expiry) {
+      LOG(INFO) << "The minimum events expiration timeout for "
+                << subscriber->getName()
+                << " has been adjusted: " << min_expiry;
     }
     subscriber->resetQueryCount(details.second.query_count);
   }

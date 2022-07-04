@@ -38,18 +38,20 @@ from gentable import *
 PLATFORM_DIRS = {
     "specs": ["darwin", "linux", "windows", "freebsd"],
     "utility": ["darwin", "linux", "freebsd", "windows"],
-    "yara": ["darwin", "linux"],
+    "yara": ["darwin", "linux", "windows"],
     "smart": ["darwin", "linux"],
     "darwin": ["darwin"],
     "freebsd": ["freebsd"],
     "kernel": ["darwin"],
+    "linwin": ["linux", "windows"],
     "linux": ["linux"],
-    "lldpd": ["linux"],
     "macwin": ["darwin", "windows"],
     "posix": ["darwin", "linux"],
     "sleuthkit": ["darwin", "linux"],
     "windows": ["windows"],
 }
+
+BASE_SOURCE_URL = "https://github.com/osquery/osquery/blob/master"
 
 def platform_for_spec(path):
     """Given a path to a table specification, return a list of what osquery
@@ -59,28 +61,23 @@ def platform_for_spec(path):
     full_path = os.path.abspath(path)
     directory_list = os.path.dirname(full_path).split("/")
     directory = directory_list[len(directory_list)-1]
-    try:
-        return PLATFORM_DIRS[directory]
-    except KeyError:
-        return ["darwin", "linux", "freebsd", "windows"]
+    return PLATFORM_DIRS[directory]
 
-def url_for_spec(path):
+def remove_prefix(text, prefix):
+    # python 3.9 has `removeprefix`, but I don't want to add that requirement.
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+
+def url_for_spec(specs_dir, path):
     """Given a path to a table specification, return the URL that would take you
     to the specification on GitHub.
     """
-    full_path = os.path.abspath(path)
-    url = "https://github.com/osquery/osquery/blob/master"
-    osquery_found = False
-    for part in full_path.split("/"):
-        if osquery_found:
-            url = url + "/" + part
-        elif part == "osquery":
-            osquery_found = True
-        else:
-            continue
+    path_fragment = remove_prefix(path, specs_dir).lstrip("/ ")
+    url = os.path.join(BASE_SOURCE_URL, "specs", path_fragment)
     return url
 
-def generate_table_metadata(full_path):
+def generate_table_metadata(specs_dir, full_path):
     """This function generates a dictionary of table metadata for a spec file
     found at a given path."""
     with open(full_path, "r") as file_handle:
@@ -96,7 +93,7 @@ def generate_table_metadata(full_path):
         t = {}
         t["name"] = table.table_name
         t["description"] = table.description
-        t["url"] = url_for_spec(full_path)
+        t["url"] = url_for_spec(specs_dir, full_path)
         t["platforms"] = platform_for_spec(full_path)
         t["evented"] = "event_subscriber" in table.attributes
         t["cacheable"] = "cacheable" in table.attributes
@@ -138,9 +135,14 @@ def main(argc, argv):
 
     for subdir, dirs, files in os.walk(specs_dir):
         for filename in files:
+            # Skip the example spec in the spec/ dir.
+            # There is no actual example table in osquery so it should not be generated into the docs.
+            if filename == "example.table":
+                continue
+
             if filename.endswith(".table"):
                 full_path = os.path.join(subdir, filename)
-                metadata = generate_table_metadata(full_path)
+                metadata = generate_table_metadata(specs_dir, full_path)
                 tables[metadata["name"]] = metadata
 
     # Print the JSON output to stdout

@@ -1,7 +1,9 @@
 project(thirdparty_openssl)
 
-set(OPENSSL_VERSION "1.1.1k")
-set(OPENSSL_ARCHIVE_SHA256 "892a0875b9872acd04a9fde79b1f943075d5ea162415de3047c327df33fbaee5")
+set(OPENSSL_VERSION "1.1.1o")
+set(OPENSSL_ARCHIVE_SHA256 "9384a2b0570dd80358841464677115df785edb941c71211f75076d72fe6b438f")
+
+set(OSQUERY_OPENSSL_ARCHIVE_PATH "" CACHE FILEPATH "Optional path to an openssl archive to use instead of downloading it")
 
 include(ExternalProject)
 
@@ -75,9 +77,21 @@ function(opensslMain)
       )
     endif()
 
+    if(TARGET_PROCESSOR STREQUAL "aarch64")
+      set(target_name
+        "darwin64-arm64-cc"
+      )
+    elseif(TARGET_PROCESSOR STREQUAL "x86_64")
+      set(target_name
+        "darwin64-x86_64-cc"
+      )
+    else()
+      message(FATAL_ERROR "Unsupported target processor")
+    endif()
+
     set(configure_command
       "${CMAKE_COMMAND}" -E env "CC=${CMAKE_C_COMPILER}" "AR=${CMAKE_AR}"
-      perl ./Configure darwin64-x86_64-cc
+      perl ./Configure "${target_name}"
         ${common_options}
         ${OSQUERY_FORMULA_CFLAGS}
 
@@ -164,10 +178,18 @@ function(opensslMain)
 
   string(REGEX MATCH "[0-9]\.[0-9]\.[0-9]" OPENSSL_VERSION_NO_PATCH "${OPENSSL_VERSION}")
 
-  set(openssl_urls
-    "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
-    "https://www.openssl.org/source/old/${OPENSSL_VERSION_NO_PATCH}/openssl-${OPENSSL_VERSION}.tar.gz"
-  )
+  if("${OSQUERY_OPENSSL_ARCHIVE_PATH}" STREQUAL "")
+    set(openssl_urls
+      "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
+      "https://www.openssl.org/source/old/${OPENSSL_VERSION_NO_PATCH}/openssl-${OPENSSL_VERSION}.tar.gz"
+    )
+  else()
+    if(NOT EXISTS "${OSQUERY_OPENSSL_ARCHIVE_PATH}" OR IS_DIRECTORY "${OSQUERY_OPENSSL_ARCHIVE_PATH}")
+      message(FATAL_ERROR "The path provided to the openssl archive is incorrect: ${OSQUERY_OPENSSL_ARCHIVE_PATH}")
+    endif()
+
+    set(openssl_urls "${OSQUERY_OPENSSL_ARCHIVE_PATH}")
+  endif()
 
   ExternalProject_Add(openssl
     URL "${openssl_urls}"

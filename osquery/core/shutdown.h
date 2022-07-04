@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <csignal>
 #include <string>
 
@@ -20,6 +21,14 @@ namespace osquery {
  * Use requestShutdown to request shutdown in most cases.
  */
 int getShutdownExitCode();
+
+/**
+ * @brief Reset the shutdown state to false.
+ *
+ * This is for internal and testing purposes.
+ * This allows for another state transition from waiting to shutdown.
+ */
+void resetShutdown();
 
 /**
  * @brief Set the requested exit code.
@@ -38,6 +47,15 @@ void setShutdownExitCode(int retcode);
  * This method should be called before Initializer::shutdown.
  */
 void waitForShutdown();
+
+/**
+ * @brief Wait either the timeout or until a #requestShutdown is issued.
+ *
+ * This method is meant to provide a sleep interruptible by the shutdown
+ * procedure. Especially useful when having to do long sleeps during retries,
+ * like during an enrollment failure.
+ */
+bool waitTimeoutOrShutdown(std::chrono::milliseconds timeout);
 
 /**
  * @brief Check if something has requested a shutdown.

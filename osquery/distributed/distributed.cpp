@@ -10,6 +10,7 @@
 #include <sstream>
 #include <utility>
 
+#include <osquery/core/flags.h>
 #include <osquery/core/plugins/logger.h>
 #include <osquery/core/system.h>
 #include <osquery/database/database.h>
@@ -33,7 +34,12 @@ FLAG(bool,
      true,
      "Disable distributed queries (default true)");
 
-const std::string kDistributedQueryPrefix{"distributed."};
+FLAG(bool,
+     distributed_loginfo,
+     false,
+     "Log the running distributed queries name at INFO level");
+
+DECLARE_bool(verbose);
 
 std::string Distributed::currentRequestId_{""};
 
@@ -79,10 +85,10 @@ Status Distributed::pullUpdates() {
   return Status::success();
 }
 
-size_t Distributed::getPendingQueryCount() {
+std::vector<std::string> Distributed::getPendingQueries() {
   std::vector<std::string> queries;
-  scanDatabaseKeys(kQueries, queries, kDistributedQueryPrefix);
-  return queries.size();
+  scanDatabaseKeys(kDistributedQueries, queries);
+  return queries;
 }
 
 size_t Distributed::getCompletedCount() {
@@ -116,10 +122,18 @@ void Distributed::addResult(const DistributedQueryResult& result) {
 }
 
 Status Distributed::runQueries() {
-  while (getPendingQueryCount() > 0) {
-    auto request = popRequest();
-    LOG(INFO) << "Executing distributed query: " << request.id << ": "
+  auto queries = getPendingQueries();
+
+  for (const auto& query : queries) {
+    auto request = popRequest(query);
+
+    if (FLAGS_verbose) {
+      VLOG(1) << "Executing distributed query: " << request.id << ": "
               << request.query;
+    } else if (FLAGS_distributed_loginfo) {
+      LOG(INFO) << "Executing distributed query: " << request.id << ": "
+                << request.query;
+    }
 
     // Keep track of the currently executing request
     Distributed::setCurrentRequestId(request.id);
@@ -216,7 +230,7 @@ Status Distributed::acceptWork(const std::string& work) {
         }
 
         if (queries_to_run.empty() || queries_to_run.count(name)) {
-          setDatabaseValue(kQueries, kDistributedQueryPrefix + name, query);
+          setDatabaseValue(kDistributedQueries, name, query);
         }
       }
     }
@@ -237,17 +251,12 @@ Status Distributed::acceptWork(const std::string& work) {
   return Status::success();
 }
 
-DistributedQueryRequest Distributed::popRequest() {
-  // Read all pending queries.
-  std::vector<std::string> queries;
-  scanDatabaseKeys(kQueries, queries, kDistributedQueryPrefix);
-
-  // Set the last-most-recent query as the request, and delete it.
-  DistributedQueryRequest request;
-  const auto& next = queries.front();
-  request.id = next.substr(kDistributedQueryPrefix.size());
-  getDatabaseValue(kQueries, next, request.query);
-  deleteDatabaseValue(kQueries, next);
+DistributedQueryRequest Distributed::popRequest(std::string query) {
+  // Prepare a request from the query and then remove it from the database.
+  DistributedQueryRequest request{};
+  request.id = query;
+  getDatabaseValue(kDistributedQueries, query, request.query);
+  deleteDatabaseValue(kDistributedQueries, query);
   return request;
 }
 

@@ -8,7 +8,7 @@ The supported compilers are: the osquery toolchain (LLVM/Clang 9.0.1) on Linux, 
 
 ## Prerequisites
 
-Git (>= 2.14.0), CMake (>= 3.17.5), Python 3 are required to build. The rest of the dependencies are downloaded by CMake.
+Git (>= 2.14.0), CMake (>= 3.21.4), Python 3 are required to build. The rest of the dependencies are downloaded by CMake.
 
 The default build type is `RelWithDebInfo` (optimizations active + debug symbols) and can be changed in the CMake configure phase by setting the `CMAKE_BUILD_TYPE` flag to `Release` or `Debug`.
 
@@ -38,11 +38,8 @@ sudo tar xvf osquery-toolchain-1.1.0-${ARCH}.tar.xz -C /usr/local
 
 # Download and install a newer CMake.
 # Afterward, verify that `/usr/local/bin` is in the `PATH` and comes before `/usr/bin`.
-# Please see the note below for building CMake on aarch64.
-if [[ "${ARCH}" = "x86_64" ]]; then
-  wget https://cmake.org/files/v3.17/cmake-3.17.5-Linux-${ARCH}.tar.gz
-  sudo tar xvf cmake-3.17.5-Linux-${ARCH}.tar.gz -C /usr/local --strip 1
-fi
+wget https://cmake.org/files/v3.21/cmake-3.21.4-linux-${ARCH}.tar.gz
+sudo tar xvf cmake-3.21.4-linux-${ARCH}.tar.gz -C /usr/local --strip 1
 
 # Download source
 git clone https://github.com/osquery/osquery
@@ -54,31 +51,17 @@ cmake -DOSQUERY_TOOLCHAIN_SYSROOT=/usr/local/osquery-toolchain ..
 cmake --build . -j10 # where 10 is the number of parallel build jobs
 ```
 
-**CMake on aarch64**
-
-If you are building for aarch64 then please notes CMake > 3.19.3 includes aarch64 Linux binaries,
-however it also has a bug that prevents creating RPMs properly.
-
-Prefer to build and install CMake from source:
-
-```bash
-wget https://github.com/Kitware/CMake/releases/download/v3.17.5/cmake-3.17.5.tar.gz
-sudo apt install gcc g++ libssl-dev
-tar zxvf cmake-3.17.5.tar.gz
-pushd cmake-3.17.5/
-./bootstrap -- -DCMAKE_BUILD_TYPE:STRING=Release
-make -j`nproc`
-sudo make install
-popd
-```
-
 ## macOS
+
+The current build of osquery supports deployment to the same set of macOS versions (macOS 10.12 and newer).  _Building_ osquery from source on macOS now requires 10.15 Catalina.
 
 The initial directory is assumed to be `/Users/<user>`
 
 ### Step 1: Install macOS prerequisites
 
-Please ensure [Homebrew](https://brew.sh/) has been installed, first. Then do the following.
+Please ensure [Homebrew](https://brew.sh/) has been installed, and install a _full copy_ of Xcode 12 or newer (not just the Xcode command-line tools, although you need to install those too — launch Xcode after installing or upgrading, and complete its installation of the "additional components" when prompted).
+
+Then do the following.
 
 ```bash
 # Install prerequisites
@@ -100,11 +83,21 @@ cd osquery
 
 # Configure
 mkdir build; cd build
-cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.12 ..
+cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.12 -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ..
 
 # Build
 cmake --build . -j $(sysctl -n hw.ncpu)
 ```
+
+### Features Requiring Special Build Entitlements
+
+Certain functionality on macOS requires an entitled and code-signed executable. By default, macOS builds from source will be _unsigned_ and these particular features will be disabled at runtime.
+
+Specifically, the `es_process_events` table makes use of the EndpointSecurity APIs, which require osquery to be code-signed with a certificate possessing the EndpointSecurity Client entitlement. If unsigned, osquery will still run as normal, but `es_process_events` will be disabled.
+
+Organizations wishing to code-sign osquery themselves will need their Apple Developer team _account owner_ to manually request and obtain the EndpointSecurity Client entitlement from Apple, for their organization's code-signing certificate. Developers can also disable SIP in a development VM (disabling SIP decreases your system's security and is _not_ recommended except on a VM dedicated to building osquery) and use ad-hoc code-signing, if they want to work on `es_process_events` without pursuing the entitlement.
+
+If using VMware Fusion 12, for example, you can reach Recovery Mode by going to Virtual Machine, Settings, Startup Disk. There, hold the Option key, and click `Restart to Firmware...`. Restarting the VM will now enter the VMware virtual EFI shell. From here, select `Enter Setup`, `Boot from a File`, and then arrow down to the Recovery partition. Hit return to find and select the `boot.efi`, and hit return again to enter Recovery Mode. From a Terminal in Recovery Mode, you can [disable SIP](https://developer.apple.com/library/archive/documentation/Security/Conceptual/System_Integrity_Protection_Guide/ConfiguringSystemIntegrityProtection/ConfiguringSystemIntegrityProtection.html) and then reboot to macOS.
 
 ## Windows 10
 
@@ -120,7 +113,7 @@ After changing that key, reboot your build machine and re-attempt the build.
 
 Note: It may be easier to install these prerequisites using [Chocolatey](https://chocolatey.org/).
 
-- [CMake](https://cmake.org/) (>= 3.17.5): the MSI installer is recommended. During installation, select the option to add it to the system `PATH` for all users. If there is any older version of CMake installed (e.g., using Chocolatey), uninstall that version first!  Do not install CMake using the Visual Studio Installer, because it contains an older version than required.
+- [CMake](https://cmake.org/) (>= 3.21.4): the MSI installer is recommended. During installation, select the option to add it to the system `PATH` for all users. If there is any older version of CMake installed (e.g., using Chocolatey), uninstall that version first!  Do not install CMake using the Visual Studio Installer, because it contains an older version than required.
 - Visual Studio 2019 (2 options)
   1. [Visual Studio 2019 Build Tools Installer](https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=BuildTools&rel=16) (without Visual Studio): In the installer choose the "C++ build tools" workload, then on the right, under "Optional", select "MSVC v142 - VS 2019 C++", "Windows 10 SDK", and "C++ Clang tools for Windows".
   2. [Visual Studio 2019 Community Installer](https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&rel=16): In the installer choose the "Desktop development with C++" workload, then on the right, under "Optional", select "MSVC v142 - VS 2019 C++", "Windows 10 SDK", and "C++ Clang tools for Windows".
@@ -307,37 +300,63 @@ vagrant up aws-amazon2015.03 --provider=aws
 vagrant ssh aws-amazon2015.03
 ```
 
-## Custom Packages
+## Building packages
 
-Package creation is facilitated by CPack. Creating a standalone custom package on any platform should be as simple as running:
+The packaging logic is now in a separate repository, [osquery-packaging](https://github.com/osquery/osquery-packaging). Packages are created in two steps:
+
+1. Create the package data from osquery/osquery
+2. Use the osquery/osquery-packaging logic to create the actual packages
+
+This approach allows maintainers to easily re-generate all the officially supported packages without going through the whole build process, which is especially useful when applying code signing from a protected machine.
+
+### Generating the package data
+
+1. Build osquery
+2. Create a destination folder and set its path in the `DESTDIR` environment variable
+3. Run the `install` target
 
 ```sh
-cmake --build . --target package
+cd build_folder
+mkdir package_data
+export DESTDIR=$(pwd)/package_data  # on Windows: `set DESTDIR=path` or `$Env:DESTDIR=path` for PowerShell
+cmake --build . --target install    # on Windows: add --config Release
 ```
 
-Invoking the `package` target will instruct `cpack` to auto resolve all of the package
-dependencies for osquery and build a platform specific package. The package created will include several components:
+The newly created folder will include several components:
 
-- The executables: `osqueryd`, `osqueryi`, and small management script `osqueryctl`
-- An osquery systemd unit on Linux (with initd script wrapper)
-- An osquery LaunchDaemon on macOS
+- The executables: `osqueryd`, `osqueryi`
 - The lenses provided by our Augeas third-party dependency
 - A default, or fall-back, OpenSSL certificate store (found within the repository)
 - The example query packs from the repository
 - Folder structures required for logging
+- Windows: small management scripts: `osqueryctl` and `manage-osqueryd.ps1`
+- Linux: systemd units, with initd script wrappers
+- macOS: a LaunchDaemon unit
+- Package control files (i.e.: deb-specific configurations, XML data required by WIX to generate MSI, etc..)
 
-What follows are instructions for directly invoking `cpack` on each platform, should
-you wish to create a more custom deployment package. For the most part this is not
-encouraged, and users should stick with leveraging the `package` target as detailed above.
+### Identifying the osquery version
 
-### On Linux
+**Linux, macOS**
 
-To create a DEB, RPM, or TGZ on Linux, CPack will attempt to auto-detect the appropriate package type.
-You may override this with the CMake `PACKAGING_SYSTEM` variable as seen in the example below.
+```sh
+cd osquery_source_folder
+git fetch --tags
 
-Note: RPM will always try to create debuginfo packages, to do so though it needs the source folder
-to be in a path that's longer than `/usr/src/debug/osquery/src_0` and the build folder
-to be in a path that's longer than `/usr/src/debug/osquery/src_1`.
+export OSQUERY_VERSION=$(git describe --tags --always)
+```
+
+**Windows**
+
+```batch
+cd osquery_source_folder
+
+git fetch --tags
+git describe --tags --abbrev=0
+
+set OSQUERY_VERSION=<version_here>
+```
+
+### Preparing to build the osquery-packaging repository
 
 Pre-requisites (for RPM builds):
 
@@ -348,40 +367,76 @@ sudo apt install binutils elfutils
 Generating an RPM package:
 
 ```sh
-cmake -DOSQUERY_TOOLCHAIN_SYSROOT=/usr/local/osquery-toolchain -DPACKAGING_SYSTEM=RPM ..
-cmake --build . --target package
+git clone https://github.com/osquery/osquery-packaging
+
+mkdir build
+cd build
 ```
+
+Common input parameters
+
+ - **OSQUERY_VERSION**: can be customized, but we usually use the output of `git describe --always`
+ - **OSQUERY_DATA_PATH**: Where the package data has been installed
+
+### Creating the Linux packages
 
 When generating packages, the install path for osquery is determined by `CMAKE_INSTALL_PREFIX` (default:
  `/usr/local/`) when building the TGZ "package", and `CMAKE_PACKAGING_INSTALL_PREFIX` (default: `/usr/`)
   when building either the DEB or RPM packages.
 
-### On Windows
+Linux-specific parameters:
 
-On Windows CPack will create an MSI by default. You can toggle this behavior to instead create a
-Chocolatey package by overriding the CMake `PACKAGING_SYSTEM` variable similar to Linux.
+ - **CPACK_GENERATOR**: Either `DEB`, `RPM` or `TGZ`
+ - **OSQUERY_SOURCE_DIRECTORY_LIST**: An optional list of paths, populated when creating the debuginfo and dbgsym packages for DEB/RPM. Pass the source and the build folders of osquery if you want to generate them.
 
-To create a default MSI package use the following:
+*Note: RPM will always try to create debuginfo packages, to do so though it needs the source folder to be in a path that's longer than `/usr/src/debug/osquery/src_0` and the build folder to be in a path that's longer than `/usr/src/debug/osquery/src_1`.*
 
 ```sh
-cmake -G "Visual Studio 16 2019" -A x64 ..
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCPACK_GENERATOR=DEB \
+  -DOSQUERY_PACKAGE_VERSION=${OSQUERY_VERSION} \
+  -DOSQUERY_DATA_PATH=${DESTDIR} \
+  -DOSQUERY_SOURCE_DIRECTORY_LIST="osquery-src-path;osquery-build-path" \
+  ../osquery-packaging
+
+cmake --build . --target package
+```
+
+### Creating the Windows packages
+
+Windows-specific parameters:
+
+ - **CPACK_GENERATOR**: Either `WIX` or `NuGet`
+ - **OSQUERY_BITNESS**: Either 32 or 64, depending on which architecture has been built
+
+*Note: Please note that the NuGet and WIX generators only support the `a.b.c` version format. If the commit being built is not tagged, consider using `git describe --tags --abbrev=0`*
+
+```batch
+call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+
+cmake -DCMAKE_BUILD_TYPE=Release ^
+  -DCPACK_GENERATOR=WIX ^
+  -DOSQUERY_PACKAGE_VERSION=%OSQUERY_VERSION% ^
+  -DOSQUERY_DATA_PATH=%DESTDIR% ^
+  -DOSQUERY_BITNESS=64 ^
+  ..\osquery-packaging
+
 cmake --build . --config Release --target package
 ```
 
-To instead generate a Chocolatey package, use the following:
+### Creating the macOS packages
+
+macOS-specific parameters:
+
+ - **CPACK_GENERATOR**: Either `productbuild` (PKG  files) or `TGZ`
 
 ```sh
-cmake -DPACKAGING_SYSTEM=NuGet -G "Visual Studio 16 2019" -A x64 ..
-cmake --build . --config Release --target package
-```
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCPACK_GENERATOR=productbuild \
+  -DOSQUERY_PACKAGE_VERSION=${OSQUERY_VERSION} \
+  -DOSQUERY_DATA_PATH=${DESTDIR} \
+  ../osquery-packaging
 
-### On macOS
-
-On macOS you can choose between a TGZ or the default PKG.
-You may override this with the CMake `PACKAGING_SYSTEM` variable as seen in the example below.
-
-```sh
-cmake -DPACKAGING_SYSTEM=TGZ -DCMAKE_OSX_DEPLOYMENT_TARGET=10.12 ..
 cmake --build . --target package
 ```
 

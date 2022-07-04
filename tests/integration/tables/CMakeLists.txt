@@ -8,7 +8,6 @@
 function(testsIntegrationTablesMain)
   generateTestsIntegrationTablesIntegrationtestshelper()
   generateTestsIntegrationTablesTestsTest()
-
 endfunction()
 
 function(generateTestsIntegrationTablesIntegrationtestshelper)
@@ -25,6 +24,7 @@ function(generateTestsIntegrationTablesIntegrationtestshelper)
     osquery_database
     osquery_sql
     osquery_utils
+    tests_helper
     thirdparty_boost
     thirdparty_googletest_headers
   )
@@ -34,6 +34,7 @@ function(generateTestsIntegrationTablesTestsTest)
   set(source_files
     carbon_black_info.cpp
     carves.cpp
+    certificates.cpp
     chrome_extensions.cpp
     curl.cpp
     curl_certificate.cpp
@@ -48,6 +49,7 @@ function(generateTestsIntegrationTablesTestsTest)
     interface_details.cpp
     listening_ports.cpp
     logged_in_users.cpp
+    npm_packages.cpp
     os_version.cpp
     osquery_events.cpp
     osquery_extensions.cpp
@@ -82,7 +84,6 @@ function(generateTestsIntegrationTablesTestsTest)
   if(DEFINED PLATFORM_POSIX)
     set(platform_source_files
       acpi_tables.cpp
-      apt_sources.cpp
       augeas.cpp
       authorized_keys.cpp
       block_devices.cpp
@@ -112,7 +113,6 @@ function(generateTestsIntegrationTablesTestsTest)
       interface_ipv6.cpp
       known_hosts.cpp
       last.cpp
-      lldp_neighbors.cpp
       load_average.cpp
       magic.cpp
       memory_array_mapped_addresses.cpp
@@ -135,13 +135,12 @@ function(generateTestsIntegrationTablesTestsTest)
       ulimit_info.cpp
       usb_devices.cpp
       user_events.cpp
-      yum_sources.cpp
     )
 
     list(APPEND source_files ${platform_source_files})
   endif()
 
-  if(OSQUERY_BUILD_AWS AND (DEFINED PLATFORM_LINUX OR DEFINED PLATFORM_WINDOWS))
+  if(OSQUERY_BUILD_AWS AND(DEFINED PLATFORM_LINUX OR DEFINED PLATFORM_WINDOWS))
     list(APPEND source_files
       ec2_instance_metadata.cpp
       ec2_instance_tags.cpp
@@ -150,13 +149,9 @@ function(generateTestsIntegrationTablesTestsTest)
 
   if(DEFINED PLATFORM_LINUX)
     set(platform_source_files
+      apt_sources.cpp
       arp_cache.cpp
       atom_packages.cpp
-      elf_dynamic.cpp
-      elf_info.cpp
-      elf_sections.cpp
-      elf_segments.cpp
-      elf_symbols.cpp
       intel_me_info.cpp
       iptables.cpp
       kernel_info.cpp
@@ -167,7 +162,6 @@ function(generateTestsIntegrationTablesTestsTest)
       memory_info.cpp
       memory_map.cpp
       msr.cpp
-      npm_packages.cpp
       portage_keywords.cpp
       portage_packages.cpp
       portage_use.cpp
@@ -177,15 +171,16 @@ function(generateTestsIntegrationTablesTestsTest)
       rpm_package_files.cpp
       rpm_packages.cpp
       selinux_events.cpp
+      secureboot.cpp
       shadow.cpp
       shared_memory.cpp
-      smart_drive_info.cpp
       socket_events.cpp
       startup_items.cpp
       syslog_events.cpp
       systemd_units.cpp
       yara_events.cpp
       yara.cpp
+      yum_sources.cpp
     )
 
     if(OSQUERY_BUILD_DPKG)
@@ -212,7 +207,6 @@ function(generateTestsIntegrationTablesTestsTest)
       authorizations.cpp
       battery.cpp
       browser_plugins.cpp
-      certificates.cpp
       crashes.cpp
       cups_destinations.cpp
       cups_jobs.cpp
@@ -253,7 +247,6 @@ function(generateTestsIntegrationTablesTestsTest)
       sharing_preferences.cpp
       signature.cpp
       sip_config.cpp
-      smart_drive_info.cpp
       smc_keys.cpp
       startup_items.cpp
       system_extensions.cpp
@@ -273,6 +266,7 @@ function(generateTestsIntegrationTablesTestsTest)
     )
 
     list(APPEND source_files ${platform_source_files})
+
   elseif(DEFINED PLATFORM_WINDOWS)
     set(platform_source_files
       appcompat_shims.cpp
@@ -281,8 +275,8 @@ function(generateTestsIntegrationTablesTestsTest)
       autoexec.cpp
       background_activities_moderator.cpp
       bitlocker_info.cpp
-      certificates.cpp
       connectivity.cpp
+      windows_firewall_rules.cpp
       chassis_info.cpp
       chocolatey_packages.cpp
       cpu_info.cpp
@@ -302,9 +296,11 @@ function(generateTestsIntegrationTablesTestsTest)
       physical_disk_performance.cpp
       pipes.cpp
       powershell_events.cpp
+      prefetch.cpp
       programs.cpp
       registry.cpp
       scheduled_tasks.cpp
+      secureboot.cpp
       services.cpp
       shared_resources.cpp
       shellbags.cpp
@@ -324,6 +320,7 @@ function(generateTestsIntegrationTablesTestsTest)
       wmi_script_event_consumers.cpp
       hvci_status.cpp
       yara.cpp
+      tpm_info.cpp
     )
 
     list(APPEND source_files ${platform_source_files})
@@ -334,7 +331,6 @@ function(generateTestsIntegrationTablesTestsTest)
     )
 
     list(APPEND source_files ${platform_source_files})
-
   endif()
 
   add_osquery_executable(tests_integration_tables-test ${source_files})
@@ -355,7 +351,10 @@ function(generateTestsIntegrationTablesTestsTest)
   )
 
   add_test(NAME tests_integration_tables-test COMMAND tests_integration_tables-test)
-
+  set_tests_properties(
+    tests_integration_tables-test
+    PROPERTIES ENVIRONMENT "TEST_CONF_FILES_DIR=${TEST_CONFIGS_DIR}"
+  )
 endfunction()
 
 testsIntegrationTablesMain()

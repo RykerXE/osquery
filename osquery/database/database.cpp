@@ -8,7 +8,7 @@
  */
 
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/io/detail/quoted_manip.hpp>
+#include <boost/io/quoted.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
 #include <osquery/core/flagalias.h>
@@ -45,14 +45,19 @@ const std::string kQueries = "queries";
 const std::string kEvents = "events";
 const std::string kCarves = "carves";
 const std::string kLogs = "logs";
+const std::string kDistributedQueries = "distributed";
 
 const std::string kDbEpochSuffix = "epoch";
 const std::string kDbCounterSuffix = "counter";
 
 const std::string kDbVersionKey = "results_version";
 
-const std::vector<std::string> kDomains = {
-    kPersistentSettings, kQueries, kEvents, kLogs, kCarves};
+const std::vector<std::string> kDomains = {kPersistentSettings,
+                                           kQueries,
+                                           kEvents,
+                                           kLogs,
+                                           kCarves,
+                                           kDistributedQueries};
 
 std::atomic<bool> kDBAllowOpen(false);
 std::atomic<bool> kDBInitialized(false);
